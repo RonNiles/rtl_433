@@ -788,3 +788,88 @@ r_device oregon_scientific = {
         .disabled    = 0,
         .fields      = output_fields,
 };
+
+static char *vivosun_t21_output_fields[] = {
+        "model",
+        "type",
+        "id",
+        "data",
+        NULL,
+};
+
+static int vivosun_t21_decode(r_device *decoder, bitbuffer_t *bitbuffer)
+{
+    data_t *data;
+    bitbuffer_t decoded = { 0 };
+    char id_str[9];
+    char data_str[32];
+    unsigned flags, serial_id, pressure;
+    int ret;
+    uint8_t *b;
+
+    /* Reject wrong length, with margin of error for extra bits at the end */
+    if (bitbuffer->bits_per_row[0] != 42) {
+        return DECODE_ABORT_LENGTH;
+    }
+    b = bitbuffer->bb[0];
+#if 0
+    /* Check preamble */
+    if (b[0] != 0xf5 || b[1] != 0x55 || b[2] != 0x55 || b[3] != 0x55
+            || (b[4] >> 4) != 0xe) {
+        return DECODE_FAIL_SANITY;
+    }
+
+    /* Check and decode the Manchester bits */
+    ret = bitbuffer_manchester_decode(bitbuffer, 0, NUM_BITS_PREAMBLE,
+                                      &decoded, NUM_BITS_DATA);
+    if (ret != NUM_BITS_TOTAL) {
+        if (decoder->verbose > 1) {
+            fprintf(stderr, "%s: invalid Manchester data\n", __func__);
+        }
+        return DECODE_FAIL_MIC;
+    }
+    bitbuffer_invert(&decoded);
+
+    /* Get the decoded data fields */
+    /* FFFSSSSS SSSSSSSS SSSSSSSS SSSPPPPP PPPPPxxx */
+    b         = decoded.bb[0];
+    flags     = b[0] >> 5;
+    serial_id = ((b[0] & 0x1f) << 19) | (b[1] << 11) | (b[2] << 3) | (b[3] >> 5);
+    pressure  = ((b[3] & 0x1f) <<  5) | (b[4] >> 3);
+
+    /* reject all-zero data */
+    if (!flags && !serial_id && !pressure) {
+        if (decoder->verbose > 1) {
+            fprintf(stderr, "%s: DECODE_FAIL_SANITY data all 0x00\n", __func__);
+        }
+        return DECODE_FAIL_SANITY;
+    }
+#endif
+
+    for (int i = 0; i < 6; ++i)
+      snprintf(&data_str[i*2], 4, "%02X", b[i]);
+    /* clang-format off */
+    data = data_make(
+            "model",            "",             DATA_STRING, "VivoSun T21",
+            "type",             "",             DATA_STRING, "temperature humidity",
+            "id",               "ID",           DATA_STRING, "tbd",
+            "data",             "Data",         DATA_STRING, data_str,
+            NULL);
+    /* clang-format on */
+
+    decoder_output_data(decoder, data);
+    return 1;
+}
+
+r_device vivosun_t21 = {
+        .name        = "VivoSun T21 temperature humidity sensor",
+        .modulation  = OOK_PULSE_PPM,
+        .short_width = 600,
+        .long_width  = 2650,
+        .gap_limit   = 7000,
+        .reset_limit = 10000,
+        .tolerance   = 400,
+        .decode_fn   = &vivosun_t21_decode,
+        .disabled    = 0,
+        .fields      = vivosun_t21_output_fields,
+};
